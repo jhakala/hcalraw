@@ -9,6 +9,7 @@ def fedMap():
          "HBHE": range(1100, 1118, 2),
          "HF": range(1118, 1124),
          "HC": [1132, 1134],
+         "FNAL": [1776],
          }
 
     d["vHCAL"] = d["vHBHE"] + d["vHF"] + d["HO"]
