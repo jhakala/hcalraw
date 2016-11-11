@@ -218,6 +218,11 @@ def outerInnerCompare(chain, oEntry, outer, inner, innerEvent, chainI, kargs):
 
     if outer["unpack"]:
         compare.compare(**kargs)
+        if kargs["plugin"]:
+             sys.path.append("plugins")
+             exec("import %s" % kargs["plugin"])
+             f = eval("%s.%s" % (kargs["plugin"], kargs["plugin"]))
+             f(**kargs)
 
 
 def loop(chain=None, chainI=None, outer={}, inner={}, innerEvent={}, options={}):

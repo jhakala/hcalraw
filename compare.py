@@ -648,7 +648,7 @@ def histogram_nMatched(book, matched=None, misMatched=None, nonMatched=None, tMa
                   title="TPs;number mis-matched;Events / bin")
 
 
-def compare(raw1={}, raw2={}, book=None, anyEmap=False,  printEmap=False, printMismatches=False, warnQuality=True, fewerHistos=False):
+def compare(raw1={}, raw2={}, book=None, anyEmap=False,  printEmap=False, printMismatches=False, warnQuality=True, fewerHistos=False, plugin=""): # last argument is a hack, FIXME
     doDump = (1 <= raw1[None]["dump"]) or raw1[None]["patterns"]
 
     if raw2 and anyEmap:
