@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 
-from options import opts
-from configuration import sw
 import array
 import math
 import collections
@@ -64,6 +62,9 @@ def xMin_xMax(graph=None):
 
 def yCounts(graph=None):
     counts = collections.defaultdict(int)
+    if not graph:
+        return counts
+
     y = graph.GetY()
     for i in range(graph.GetN()):
         counts[int(y[i])] += 1
@@ -195,7 +196,7 @@ def x_last_filled(h):
             return h.GetBinLowEdge(iBin) + h.GetBinWidth(iBin)
 
 
-def histoLoop(f, lst, func, zoom=False):
+def histoLoop(f, lst, hFunc=None, sFunc=None, zoom=False):
     out = []
     ymaxes = []
     xmins = []
@@ -203,10 +204,13 @@ def histoLoop(f, lst, func, zoom=False):
     legEntries = []
     h0 = None
 
+    if not sFunc:
+        sFunc = lambda x: x
+
     didOne = False
     twoLines = False
     for x, color, style in lst:
-        h = f.Get(func(x))
+        h = f.Get(sFunc(x))
         if not h:
             continue
 
@@ -220,6 +224,8 @@ def histoLoop(f, lst, func, zoom=False):
             h0 = h
 
         shiftFlows(h)
+        if hFunc:
+            hFunc(h)
         h.Draw(gopts)
         stylize(h, color, style)
         magnify(h, factor=1.8)
@@ -235,10 +241,10 @@ def histoLoop(f, lst, func, zoom=False):
 
 
         s = "Matched"
-        if func(x).startswith(s):
+        if sFunc(x).startswith(s):
             h.GetXaxis().SetLabelSize(0.04)
             twoLines = True
-            ch = func(x).replace(s, "").replace("Fibers", "").replace("TriggerTowers", "")
+            ch = sFunc(x).replace(s, "").replace("Fibers", "").replace("TriggerTowers", "")
             if not ch:
                 ch = "TP  "
             t = "%s  %d#pm%d" % (ch, h.GetMean(), h.GetRMS())
@@ -259,7 +265,7 @@ def histoLoop(f, lst, func, zoom=False):
     return out
 
 
-def graphLoop(f, lst, func):
+def graphLoop(f, lst, sFunc):
     out = []
     legEntries = []
     h0 = None
@@ -270,7 +276,7 @@ def graphLoop(f, lst, func):
     mins = []
     maxs = []
     for x, _, _ in lst:
-        g = f.Get(func(x))
+        g = f.Get(sFunc(x))
         if not g:
             continue
         xMin, xMax = xMin_xMax(g)
@@ -278,7 +284,7 @@ def graphLoop(f, lst, func):
         maxs.append(xMax)
 
     for x, color, style in lst:
-        g = f.Get(func(x))
+        g = f.Get(sFunc(x))
         if not g:
             continue
 
@@ -465,24 +471,23 @@ def plotGlobal(f, pad, offset=None, names=[], logY=False, logX=False, logZ=True,
 
         h.Draw(gopts + "same")  # draw again to be on top of dashed lines
 
-        yx = r.TF1("yx", "x", -0.5, xMax)
-        yx.SetNpx(int(0.5 + xMax))
-        yx.SetLineColor(r.kBlack)
-        yx.SetLineWidth(1)
-        yx.SetLineStyle(3)
-        if doYx:
-            yx.Draw("same")
-
         leg = r.TLegend(0.25, 0.73, 0.4, 0.85)
         leg.SetBorderSize(0)
         leg.SetFillStyle(0)
 
         if doYx:
+            yx = r.TF1("yx", "x", -0.5, xMax)
+            yx.SetNpx(int(0.5 + xMax))
+            yx.SetLineColor(r.kBlack)
+            yx.SetLineWidth(1)
+            yx.SetLineStyle(3)
+            yx.Draw("same")
             leg.AddEntry(yx, "y = x", "l")
             # leg.AddEntry(x0, "zero", "l")
+            keep.append(yx)
 
         leg.Draw()
-        keep += [h, yx, leg]
+        keep += [h, leg]
         # if name == "adc_vs_adc":
         #     h.SetTitle("")
         #     h.GetXaxis().SetTitle("ADC  (VME FEDs 718,719)")
@@ -518,7 +523,7 @@ def plotList(f, pad, offset=None, names=[],
         for iFed, fed in enumerate(sorted(fedList)):
             feds.append((fed, color[iFed], style[iFed]))
 
-        keep += func(f, feds, lambda x: "%s_%d" % (name, x))
+        keep += func(f, feds, sFunc=lambda x: "%s_%d" % (name, x))
     return keep
 
 
@@ -526,7 +531,7 @@ def fedString(feds):
     for step in range(1, 3):
         if 3 <= len(feds) and feds == range(feds[0], 1 + feds[-1], step):
             return "%d: %d - %d" % (len(feds), feds[0], feds[-1])
-    return ",".join(["%d" % iFed for iFed in feds])
+    return utils.shortList(feds)
 
 
 def plotMerged(f, pad, offset=None, names=[],
@@ -574,6 +579,9 @@ def plotMerged(f, pad, offset=None, names=[],
 
 
 def resyncs(graph=None, maximum=None):
+    if not graph:
+        return graph
+
     n = graph.GetN()
     x = graph.GetX()
     y = graph.GetY()
@@ -609,6 +617,9 @@ def big_clean(size=None, frac0=None, sizeMin=None, frac0Min=None, height=None):
 
 def anyVisible(graph=None, maximum=None):
     n = graph.GetN()
+    if 5.0e3 < n:
+        return False
+
     y = graph.GetY()
     for i in range(n):
         if y[i] <= maximum:
@@ -626,12 +637,12 @@ def stamp(title, size=0.045, x=0.01, y=0.99):
 
 
 def draw_graph(graph=None, title="", ratemax=None, graph2=None, graph3=None, graph4=None):
-    if not graph or not graph.GetN():
-        return
-
     padg = r.TPad("padg", "padg", 0.00, 0.75, 0.75, 1.00)
     padg.Draw()
     keep = [padg]
+
+    if not graph or not graph.GetN():
+        return keep
 
     if ratemax:
         split = 0.3
@@ -896,32 +907,24 @@ def pageOne(f=None, feds1=[], feds2=[], canvas=None, pdf="", title=""):
     sfx = suffix(feds1, feds2)
 
     cats = f.Get("category_vs_time" + sfx)
-    if not cats:
-        return
-    if not cats.GetN():
-        return
-
     counts = yCounts(cats)
-    if 2 <= len(counts.keys()):
+    if cats and cats.GetN() and 2 <= len(counts.keys()):
         relabel(cats, counts)
         keep += draw_graph(cats, title=title)
     else:
         ratemax = 5.0e7
-
+        graph4 = None
         evn_graph = f.Get("evn_vs_time" + sfx)
-        retitle(evn_graph)
+        if evn_graph:
+            retitle(evn_graph)
+            if "/239/895" in evn_graph.GetTitle():
+                graph4 = big_clean(size=f.Get("kB_vs_time_%d" % feds1[0]),
+                                   frac0=f.Get("frac0_vs_time_%d" % feds1[0]),
+                                   sizeMin=0.8,
+                                   frac0Min=0.2,
+                                   height=ratemax / 5.0)
 
-        if "/239/895" in evn_graph.GetTitle():
-            graph4 = big_clean(size=f.Get("kB_vs_time_%d" % feds1[0]),
-                               frac0=f.Get("frac0_vs_time_%d" % feds1[0]),
-                               sizeMin=0.8,
-                               frac0Min=0.2,
-                               height=ratemax / 5.0)
-        else:
-            graph4 = None
-
-        keep += draw_graph(graph=evn_graph,
-                           title=title, ratemax=ratemax,
+        keep += draw_graph(graph=evn_graph, title=title, ratemax=ratemax,
                            graph2=f.Get("bcn_delta_vs_time" + sfx),
                            graph3=resyncs(f.Get("incr_evn_vs_time" + sfx), ratemax),
                            graph4=graph4,
@@ -929,25 +932,23 @@ def pageOne(f=None, feds1=[], feds2=[], canvas=None, pdf="", title=""):
 
     pad20.cd(4)
     adjustPad(logY=True)
-    keep += histoLoop(f, [("BcN_%d" % sorted(feds1)[0], r.kBlack, 1)], lambda x: x)
+    keep += histoLoop(f, [("BcN_%d" % sorted(feds1)[0], r.kBlack, 1)], hFunc=lambda x: x.RebinX(99))
 
     plotFunc = plotMerged if feds2 or 4 <= len(feds1) else plotList
     keep += plotFunc(f, pad20, offset=5,
                      names=["nBytesSW", "htrOverviewBits", "nChannels", "nTpTowers",
-                            "EvN_HTRs", "OrN5_HTRs", "BcN_HTRs", "",
+                            "EvN_HTRs", "OrN5_HTRs", "BcN_HTRs", "TDCHitTime",
                             "ChannelFlavor", "ErrF0", "nQieSamples", "nTpSamples",
                             # "TTS", "PopCapFrac",
                             ], feds1=feds1, feds2=feds2)
 
-    pad20.cd(12)
-    adjustPad(logY=True)
-    keep += histoLoop(f,
-                      [("nTS_for_matching_ADC", r.kBlue, 1),
-                       ("nTS_for_matching_TP", r.kCyan, 2),
-                       ],
-                      lambda x: x,
-                      )
-
+    # pad20.cd(12)
+    # adjustPad(logY=True)
+    # keep += histoLoop(f,
+    #                   [("nTS_for_matching_ADC", r.kBlue, 1),
+    #                    ("nTS_for_matching_TP", r.kCyan, 2),
+    #                    ],
+    #                   )
 
     canvas.Print(pdf)
 
@@ -972,7 +973,7 @@ def plotEvnOrnBcnPerFed(f, feds1, feds2):
                            ("OrN", r.kCyan, 2),
                            ("BcN", r.kBlack, 3),
                            ],
-                          lambda x: "delta%s_%s_%s" % (x, fed1, fed2),
+                          sFunc=lambda x: "delta%s_%s_%s" % (x, fed1, fed2),
                           )
     return keep
 
@@ -988,7 +989,6 @@ def plotMatch(f, pad0, feds1, feds2):
                        ("MatchedFibersCh2", r.kBlack, 3),
                        ("MatchedTriggerTowers", r.kGreen, 4),
                        ],
-                      lambda x: x,
                       zoom=True,
                       )
 
@@ -1000,13 +1000,12 @@ def plotMatch(f, pad0, feds1, feds2):
                        ("MisMatchedFibersCh2", r.kBlack, 3),
                        ("MisMatchedTriggerTowers", r.kGreen, 4),
                        ],
-                      lambda x: x,
                       )
     return keep
 
 
-def pageTwo(f=None, feds1=[], feds2=[], canvas=None, pdf="", names=[], title="", denoms={},
-            doYx=True, retitle=True, gridX=False, gridY=False, boxes=False, alsoZs=False, alsoMatch=False):
+def pageTwo(f=None, feds1=[], feds2=[], canvas=None, pdf="", names=[], title="", gopts="colz", denoms={},
+            doYx=True, retitle=True, gridX=False, gridY=False, logY=False, boxes=False, alsoZs=False, alsoMatch=False):
 
     # don't print blank page
     if not any([f.Get(name) for name in names]):
@@ -1025,7 +1024,7 @@ def pageTwo(f=None, feds1=[], feds2=[], canvas=None, pdf="", names=[], title="",
     pad0.Draw()
 
     kargs = {}
-    for item in ["feds1", "feds2", "names", "denoms", "doYx", "retitle", "gridX", "gridY", "boxes"]:
+    for item in ["feds1", "feds2", "names", "denoms", "doYx", "retitle", "gopts", "gridX", "gridY", "logY", "boxes"]:
         kargs[item] = eval(item)
 
     nContours = r.gStyle.GetNumberContours()
@@ -1042,7 +1041,6 @@ def pageTwo(f=None, feds1=[], feds2=[], canvas=None, pdf="", names=[], title="",
         keep.append(stamp(title))
 
     canvas.Print(pdf)
-    r.gStyle.SetPalette(1)
     r.gStyle.SetNumberContours(nContours)
 
 
@@ -1053,7 +1051,7 @@ def pageThree(stem, suppress=lambda x: False, yx=False, keys=["feds1", "feds2"],
     h = summed(kargs["f"], names)
 
     if h and not suppress(h):
-        pageTwo(names=names, doYx=yx, retitle=False, gridX=True, **kargs)
+        pageTwo(names=names, doYx=yx, retitle=False, **kargs)
 
 
 def pageTrends(f=None, feds1=[], feds2=[], canvas=None, pdf="", title="", names=[]):
@@ -1127,6 +1125,30 @@ def makeSummaryPdfMulti(inputFiles=[], feds1s=[], feds2s=[], pdf="summary.pdf", 
         kargs34 = {"names": names, "doYx": False, "retitle": False, "boxes": False}
         kargs34.update(kargs)
 
+        if "ts" in pages:
+            pageThree(stem="ADC_vs_TS_ErrF0_%d", gridX=True, **kargs)
+            pageThree(stem="TDC_vs_TS_ErrF0_%d", gridX=True, **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrFNZ_%d", **kargs)
+
+            feds1 = kargs["feds1"]  # stash default
+
+            kargs["feds1"] = range(32) # iterate over fibers
+            pageThree(stem="ADC_vs_TS_HEP17_ErrF0_fib%d", gridX=True, **kargs)
+
+            kargs["feds1"] = range(10) # iterate over TS
+            pageThree(stem="HEP17_ADC_TS%d", gopts="hist", logY=True, **kargs)
+
+            kargs["feds1"] = feds1  # restore default
+
+            # pageThree(stem="ADC_vs_TS_ErrF0_Slot10_%d", **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrF0_Slot11_%d", **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrF0_Slot12_%d", **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrFNZ_Slot10_%d", **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrFNZ_Slot11_%d", **kargs)
+            # pageThree(stem="ADC_vs_TS_ErrFNZ_Slot12_%d", **kargs)
+            # pageThree(stem="cr34_sl11_fib.ge.12_ts0_vs_EvN_%d", **kargs)
+            # pageThree(stem="cr34_sl11_fib.ge.12_ts1_vs_EvN_%d", **kargs)
+
         if "maps_rates" in pages:
             pageTwo(**kargs34)
 
@@ -1139,8 +1161,8 @@ def makeSummaryPdfMulti(inputFiles=[], feds1s=[], feds2s=[], pdf="summary.pdf", 
             pageTwo(denoms=denoms, **kargs34)
 
         if "maps_errf" in pages:
-            denoms = {"ErrF1_vs_slot_crate": "ErrFAny_vs_slot_crate",
-                      "ErrF3_vs_slot_crate": "ErrFAny_vs_slot_crate",
+            denoms = {# "ErrF1_vs_slot_crate": "ErrFAny_vs_slot_crate",
+                      # "ErrF3_vs_slot_crate": "ErrFAny_vs_slot_crate",
                       "ErrFNZ_vs_slot_crate": "ErrFAny_vs_slot_crate",
                       }
             kargs34["names"] = sorted(denoms.keys())
@@ -1164,16 +1186,11 @@ def makeSummaryPdfMulti(inputFiles=[], feds1s=[], feds2s=[], pdf="summary.pdf", 
 
         if "trends" in pages:
             pageTrends(names=["fracEvN_vs_time", "frac0_vs_time", "ADC_misMatch_vs_time"], **kargs)
+            pageThree(stem="ts_vs_time_%d", **kargs)
 
         if "occupancy" in pages:
             pageThree(stem="fiber_vs_slot_%d", suppress=full_utca_crate, keys=["feds2"], **kargs)
 
-        if "ts" in pages:
-            pageThree(stem="ts_vs_time_%d", **kargs)
-
-        if "ts0" in pages:
-            pageThree(stem="cr34_sl11_fib.ge.12_ts0_vs_EvN_%d", **kargs)
-            pageThree(stem="cr34_sl11_fib.ge.12_ts1_vs_EvN_%d", **kargs)
 
         f.Close()
     canvas.Print(pdf + "]")
@@ -1191,17 +1208,15 @@ def main(outputFile, feds1=[], feds2=[]):
     )
 
 
-all_pages = ["overview", "vs", "page3",
+all_pages = ["overview",
+             "ts",
+             "maps_evn_orn_bcn",
+             "maps_errf",
+             "vs",
+             "page3",
              # "maps_rates",
-             "maps_evn_orn_bcn", "maps_errf", "maps_adc_tp",
+             # "maps_adc_tp",
              "frac0_orbit",
-             "evn", "orn",
-             # "trends",
-             "occupancy",
-             # "ts",
-             # "ts0",
+             "trends",
+             "evn", "orn", "occupancy",
              ]
-
-
-if __name__ == "__main__":
-    main(opts()[0])

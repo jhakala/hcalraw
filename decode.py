@@ -1,10 +1,11 @@
-# AMC13 (May 2014 onward) http://ohm.bu.edu/~hazen/CMS/AMC13/UpdatedDAQPath_2014-05-01.pdf
-# uHTR  (May 2014 onward) https://cms-docdb.cern.ch/cgi-bin/DocDB/RetrieveFile?docid=12306
-# AMC13/uHTR (through April 2014) http://ohm.bu.edu/~hazen/CMS/SLHC/HcalUpgradeDataFormat_v1_2_3.pdf
-# DCC2 http://cmsdoc.cern.ch/cms/HCAL/document/CountingHouse/DCC/FormatGuide.pdf
-# HTR https://cms-docdb.cern.ch/cgi-bin/PublicDocDB/RetrieveFile?docid=3327&version=14&filename=HTR_MainFPGA.pdf
-# TTP http://cmsdoc.cern.ch/cms/HCAL/document/Aux/HcalTechTriggerProcessor/dataformat.html
-# MOL/FEROL https://twiki.cern.ch/twiki/bin/viewauth/CMS/CMD_FEROL_DOC
+# uHTR         https://cms-docdb.cern.ch/cgi-bin/DocDB/RetrieveFile?docid=12306
+# uMNio        https://cms-docdb.cern.ch/cgi-bin/DocDB/RetrieveFile?docid=12925
+# HTR          https://cms-docdb.cern.ch/cgi-bin/DocDB/RetrieveFile?docid=3327&filename=HTR_MainFPGA.pdf
+# TTP          https://cmsdoc.cern.ch/cms/HCAL/document/Aux/HcalTechTriggerProcessor/dataformat.html
+# DCC2         https://cmsdoc.cern.ch/cms/HCAL/document/CountingHouse/DCC/FormatGuide.pdf
+# MOL/FEROL    https://twiki.cern.ch/twiki/bin/viewauth/CMS/CMD_FEROL_DOC
+# AMC13        https://ohm.bu.edu/~hazen/CMS/AMC13/UpdatedDAQPath_2014-05-01.pdf
+# thru 2014-04 https://ohm.bu.edu/~hazen/CMS/SLHC/HcalUpgradeDataFormat_v1_2_3.pdf
 
 
 from configuration import hw, matching
@@ -59,7 +60,7 @@ def uHtrDict(w, l=[]):
             }
 
 
-def header(d={}, iWord64=None, word64=None):
+def header(d={}, iWord64=None, word64=None, lastN=None):
     w = word64
     if iWord64 == 0:
         #d["FoV"] = (w >> 4) & 0xf
@@ -73,12 +74,12 @@ def header(d={}, iWord64=None, word64=None):
         d["uFoV"] = (w >> 60) & 0xf
 
     if d["uFoV"]:
-        block_header_ufov1(d=d, iWord64=iWord64, word64=word64)
+        block_header_ufov1(d=d, iWord64=iWord64, word64=word64, lastN=lastN)
     else:
         header_ufov0(d=d, iWord64=iWord64, word64=word64)
 
 
-def block_header_ufov1(d={}, iWord64=None, word64=None):
+def block_header_ufov1(d={}, iWord64=None, word64=None, lastN=None):
     w = word64
     if iWord64 == 1:
         d["word16Counts"] = []
@@ -89,24 +90,31 @@ def block_header_ufov1(d={}, iWord64=None, word64=None):
 
         d["nAMC"] = (w >> 52) & 0xf
         d["iWordPayload0"] = 2 + d["nAMC"]
+        d["iWordPayloadn"] = d["iWordPayload0"]
         return
 
-    if iWord64 < d["iWordPayload0"]:
-        iAMC = (w >> 16) & 0xf
-        key = "uHTR%d" % iAMC
-        d[key] = {}
+    if d["iWordPayload0"] <= iWord64:
+        return
 
-        lmsepvc = (w >> 56) & 0x7f
-        for i, l in enumerate(["L", "M", "S", "E", "P", "V", "C"]):
-            d[key][l] = (lmsepvc >> (6-i)) & 0x1
+    if lastN and iWord64 < d["iWordPayload0"] - lastN:
+        d["iWordPayloadn"] += (w >> 32) & 0xffffff
+        return
 
-        if d[key]["M"]:
-            sys.exit("multi-block unpacking not implemented")
-        d[key]["BoardID"] = w & 0xffff
-        d[key]["Blk_no"] = (w >> 20) & 0xff
-        d[key]["nWord16"] = (w >> 32) & 0xffffff
-        d[key]["nWord16"] *= 4
-        d["word16Counts"].append(d[key]["nWord16"])
+    iAMC = (w >> 16) & 0xf
+    key = "uHTR%d" % iAMC
+    d[key] = {}
+
+    lmsepvc = (w >> 56) & 0x7f
+    for i, l in enumerate(["L", "M", "S", "E", "P", "V", "C"]):
+        d[key][l] = (lmsepvc >> (6-i)) & 0x1
+
+    if d[key]["M"]:
+        sys.exit("multi-block unpacking not implemented")
+    d[key]["BoardID"] = w & 0xffff
+    d[key]["Blk_no"] = (w >> 20) & 0xff
+    d[key]["nWord16"] = (w >> 32) & 0xffffff
+    d[key]["nWord16"] *= 4
+    d["word16Counts"].append(d[key]["nWord16"])
 
 
 def block_trailer_ufov1(d={}, iWord64=None, word64=None):
@@ -233,15 +241,11 @@ def htrHeaderV1(l={}, w=None, i=None, utca=None):
         l["EventType"] = (w >> 8) & 0xf
         l["FwFlavor"] = w & 0xff
         l["FormatVer"] = l["PayloadFormat"]  # compat
+        l["IsIO"] = l["PayloadFormat"] == 2
+        l["IsTTP"] = False
 
     if i == 7:
         l["Header7"] = w
-
-    l["IsTTP"] = False
-    l["channelData"] = {}
-    l["triggerData"] = {}
-    l["technicalData"] = {}
-    l["otherData"] = {}
 
 
 def htrHeaderV0(l={}, w=None, i=None, utca=None):
@@ -279,10 +283,6 @@ def htrHeaderV0(l={}, w=None, i=None, utca=None):
         l["UnsupportedFormat"] = (not utca) and (l["FormatVer"] != 6)
 
     if i == 5:
-        l["channelData"] = {}
-        l["triggerData"] = {}
-        l["technicalData"] = {}
-        l["otherData"] = {}
         if utca:
             #l["nWord16Payload"] = w & 0x1fff  # !document
             l["nPreSamples"] = (w >> 3) & 0x1f  # !document
@@ -295,6 +295,7 @@ def htrHeaderV0(l={}, w=None, i=None, utca=None):
         l["CM"] = (w >> 14) & 0x1
 
     if i == 7:
+        l["IsIO"] = False
         l["IsTTP"] = (w >> 15) & 0x1
         l["PipelineLength"] = w & 0xff
         if l["IsTTP"]:
@@ -387,7 +388,7 @@ def end(d):
 def payload(d={}, iWord16=None, word16=None, word16Counts=[],
             utca=None, fedId=None, warn=True, dump=-99):
 
-    if 10 <= dump:
+    if 12 <= dump:
         print "      (%5d 0x%04x)" % (iWord16, word16)
 
     if "htrIndex" not in d:
@@ -410,8 +411,11 @@ def payload(d={}, iWord16=None, word16=None, word16Counts=[],
             l["headerWords"] = []
         l["headerWords"].append(word16)
         if i == 7:
-            l["V1"] = (l["headerWords"][6] >> 12) & 0x1
-            l["V1"] &= utca
+            l["channelData"] = {}
+            l["triggerData"] = {}
+            l["technicalData"] = {}
+            l["otherData"] = {}
+            l["V1"] = utca and ((l["headerWords"][6] >> 12) & 0x3)
             func = htrHeaderV1 if l["V1"] else htrHeaderV0
             for iHeaderWord in range(8):
                 func(l, w=l["headerWords"][iHeaderWord], i=iHeaderWord, utca=utca)
@@ -448,28 +452,32 @@ def payload(d={}, iWord16=None, word16=None, word16Counts=[],
 
     if l["IsTTP"]:
         ttpData(l, (i - 8) % 6, word16)
-    else:
-        if not utca:
-            if i < 8 + l["nWord16Tp"]:
-                htrTps(l, word16, bot=l["Top"]=="b")
-                return
+        return
+    elif l["IsIO"]:
+        # ioData(l)
+        return
 
-            if (3 <= k <= 4):
-                htrPreTrailer(l, word16, k)
-                return
+    if not utca:
+        if i < 8 + l["nWord16Tp"]:
+            htrTps(l, word16, bot=l["Top"]=="b")
+            return
 
-            if (5 <= k <= 12) and not l["CM"]:
-                htrExtra(l, w=word16, i=13-k)
-                return
+        if (3 <= k <= 4):
+            htrPreTrailer(l, word16, k)
+            return
 
-        htrData(d=d,
-                l=l,
-                iWord16=iWord16,
-                word16=word16,
-                utca=utca,
-                fedId=fedId,
-                warn=warn,
-                )
+        if (5 <= k <= 12) and not l["CM"]:
+            htrExtra(l, w=word16, i=13-k)
+            return
+
+    htrData(d=d,
+            l=l,
+            iWord16=iWord16,
+            word16=word16,
+            utca=utca,
+            fedId=fedId,
+            warn=warn,
+            )
 
 
 def ttpData(l={}, iDataMod6=None, word16=None):
@@ -547,6 +555,15 @@ def channelInit(iWord16=None, word16=None, flavor=None, utca=None):
         channelHeader["FibCh"] = channelId & 0x7
         for key in ["SOI", "OK", "QIE", "CapId", "TDC", "TDC_TE"]:
             channelHeader[key] = []
+    elif flavor == 3:
+        dataKey = "channelData"
+        channelHeader["ErrF"] = (word16 >> 11) & 0x1  # compat
+        channelHeader["M&P"] = (word16 >> 8) & 0x1
+        channelId = word16 & 0xff
+        channelHeader["Fiber"] = channelId >> 3
+        channelHeader["FibCh"] = channelId & 0x7
+        for key in ["SOI", "OK", "QIE", "CapId", "TDC"]:
+            channelHeader[key] = []
     elif flavor == 4:
         channelHeader["ErrF"] = (word16 >> 10) & 0x3
         dataKey = "triggerData"
@@ -596,6 +613,13 @@ def storeChannelData(dct={}, iWord16=None, word16=None):
             dct["SOI"].append((word16 >> 13) & 0x1)
             dct["OK"].append((word16 >> 12) & 0x1)
             dct["QIE"].append(word16 & 0xff)
+    elif flavor == 3:
+        dct["SOI"].append((word16 >> 14) & 0x1)
+        dct["OK"].append((word16 >> 13) & 0x1)
+        dct["CapId"].append((word16 >> 10) & 0x3)
+        dct["CapId0"] = dct["CapId"][0]  # compat
+        dct["TDC"].append((word16 >> 8) & 0x3)
+        dct["QIE"].append(word16 & 0xff)
     elif flavor == 4:
         dct["SOI"].append((word16 >> 14) & 0x1)
         dct["OK"].append((word16 >> 13) & 0x1)

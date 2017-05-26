@@ -1,6 +1,5 @@
 import re
 
-nTsMax = 20                # consider up to this many acquired time slices (phase-0)
 patternB = False           # consider also patterns mixed across fibers
 rmRibbon = False           # pair central 6 fibers (of 8 or 12)
 compressed = True          # handle lack of per-TS capids
@@ -112,7 +111,7 @@ def string01(code=None):
     if ng_looks_broken(code):
         return "0x%022x" % code
     else:
-        return "%s%s%d %d %d" % (subdet, side, rbx_number, rm, 2*qie_card + link_num - 1)
+        return "%s%s%d %2d %d" % (subdet, side, rbx_number, rm, 2*qie_card + link_num - 1)
 
 
 def rbxes():

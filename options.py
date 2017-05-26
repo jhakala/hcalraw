@@ -1,10 +1,9 @@
 import optparse
-import sys
 
 
-def opts(alsoArgs=False):
-    if alsoArgs:
-        parser = optparse.OptionParser(usage="usage: %prog [options] args")
+def oparser(arg=""):
+    if arg:
+        parser = optparse.OptionParser(usage="usage: %prog [options] " + arg)
     else:
         parser = optparse.OptionParser()
 
@@ -21,7 +20,7 @@ def opts(alsoArgs=False):
 
     common = optparse.OptionGroup(parser, "Misc options")
     common.add_option("--nevents",
-                      dest="nEvents",
+                      dest="nEventsMax",
                       default=0,
                       metavar="N",
                       type="int",
@@ -43,26 +42,6 @@ def opts(alsoArgs=False):
                       metavar="S",
                       type="int",
                       help="Loop over only (up to) S events per file.")
-    common.add_option("--no-loop",
-                      dest="noLoop",
-                      default=False,
-                      action="store_true",
-                      help="Plot from existing .root file (do not look at data).")
-    common.add_option("--no-unpack",
-                      dest="noUnpack",
-                      default=False,
-                      action="store_true",
-                      help="Loop over raw data, but do not unpack it.")
-    common.add_option("--fewer-histos",
-                      dest="fewerHistos",
-                      default=False,
-                      action="store_true",
-                      help="Save time by making fewer histograms.")
-    common.add_option("--no-plot",
-                      dest="noPlot",
-                      default=False,
-                      action="store_true",
-                      help="Do not make .pdf from .root file")
     common.add_option("--profile",
                       dest="profile",
                       default=False,
@@ -70,17 +49,52 @@ def opts(alsoArgs=False):
                       help="Profile this program.")
 
     plugins = ["Comma-separated list of plugins to run on each event.",
-               "E.g., --plugins=compare,foo will execute",
-               "first the function compare from plugins/compare.py",
-               "and then the function foo from plugins/foo.py"
+               "E.g., --plugins=histogram,compare will execute",
+               "first the function compare from plugins/histogram.py",
+               "and then the function foo from plugins/compare.py"
               ]
     common.add_option("--plugins",
                       dest="plugins",
                       type="str",
-                      metavar="compare,...",
-                      default="compare",
+                      metavar="histogram,...",
+                      default="histogram",
                       help=" ".join([l.ljust(60) for l in plugins]))
     parser.add_option_group(common)
+
+    less = optparse.OptionGroup(parser, "Options to do less work")
+    less.add_option("--no-loop",
+                    dest="noLoop",
+                    default=False,
+                    action="store_true",
+                    help="Plot from existing .root file (do not look at data).")
+    less.add_option("--no-unpack",
+                    dest="noUnpack",
+                    default=False,
+                    action="store_true",
+                    help="Loop over raw data, but do not unpack it.")
+    less.add_option("--last-n-amcs",
+                    dest="lastNAmcs",
+                    default=0,
+                    metavar="N",
+                    type="int",
+                    help="Consider only the final N AMCs per FED (0 means all).")
+    less.add_option("--first-n-ts",
+                    dest="firstNTs",
+                    default=10,
+                    metavar="N",
+                    type="int",
+                    help="Consider only the first N time slices (default is 10).")
+    less.add_option("--fewer-histograms",
+                    dest="fewerHistos",
+                    default=False,
+                    action="store_true",
+                    help="Save time by making fewer histograms.")
+    less.add_option("--no-plot",
+                    dest="noPlot",
+                    default=False,
+                    action="store_true",
+                    help="Do not make .pdf from .root file")
+    parser.add_option_group(less)
 
     printing = optparse.OptionGroup(parser, "Options for printing to stdout")
     printing.add_option("--no-color",
@@ -105,7 +119,7 @@ def opts(alsoArgs=False):
                         help="suppress warnings about problems with data quality")
     printing.add_option("--crateslots",
                         dest="crateslots",
-                        default=None,
+                        default="",
                         metavar="D",
                         help="list of (100*crate)+slot to dump, e.g. 917,2911")
 
@@ -115,13 +129,15 @@ def opts(alsoArgs=False):
             "1: DCC/AMC13 headers",
             "2: (u)HTR summary info",
             "3: (u)HTR headers",
-            "4: data (fibCh=1, ErrF != 3)",
-            "5: data (fibCh=1, ErrF != 3); TPs (> 0)",
-            "6: data (fibCh=1           ); TPs (> 0)",
-            "7: data (         ErrF != 3); TPs (> 0)",
-            "8: data (all               ); TPs (all)",
-            "9: 64bit words; all data and TPs",
-            "10: 64(+16)bit words; all data and TPs",
+            "4: data (fib=2,14  fibCh=1), formatted compactly",
+            "5: data (fib=all   fibCh=1   ErrF != 3)",
+            "6: data (fib=all   fibCh=1   ErrF != 3); TPs (> 0)",
+            "7: data (fib=all   fibCh=1            ); TPs (> 0)",
+            "8: data (                    ErrF != 3); TPs (> 0)",
+            "9: data (all)                          ; TPs (all)",
+            "10: data(                    ErrF != 0); TPs (!OK)",
+            "11: 64bit words; all data and TPs",
+            "12: 64(+16)bit words; all data and TPs",
             ]
     printing.add_option("--dump",
                         dest="dump",
@@ -162,8 +178,8 @@ def opts(alsoArgs=False):
                        default=0,
                        metavar="n",
                        type="int",
-                       help="Number of BX to add to uTCA counters (default is 0)")
-    matchCh.add_option("--utca-pipeline-delta",
+                       help="Add n BX to uTCA BcN counters (default is 0)")
+    matchCh.add_option("--utca-pipe-sub",
                        dest="utcaPipelineDelta",
                        default=0,
                        metavar="n",
@@ -186,23 +202,4 @@ def opts(alsoArgs=False):
                        help="Print mismatching ADCs or TPs.")
     parser.add_option_group(matchCh)
 
-    look = optparse.OptionGroup(parser, "Options solely for use with look.py")
-    look.add_option("--hhmm",
-                    dest="hhmm",
-                    default=None,
-                    type="int",
-                    help="minimum hhmm")
-    look.add_option("--hf",
-                    dest="hf",
-                    default=False,
-                    action="store_true",
-                    help="consider (u)HF rather than (u)HBHE")
-    parser.add_option_group(look)
-
-    options, args = parser.parse_args()
-
-    if alsoArgs and not args:
-        parser.print_help()
-        sys.exit(1)
-
-    return options, args
+    return parser

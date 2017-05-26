@@ -6,17 +6,13 @@ cd hcalraw
 source env/lxplus6.sh
 cd cpp; make -j 5; cd -
 
-
-# analyze a global or local run
 ./look.py 284928
 ./look.py 289555 --nevents=1 --dump=8
+./look.py 294542 --feds1=1115 --nevents=1000
+```
 
-
-# analyze several global runs
-cat gr_list.txt | ./multi.py --nevents=100
-cat gr_list.txt | ./dqReport.py
-
-
+#### More Examples
+```bash
 # analyze AMC13/DCC2 monitor buffer dumps
 # HF (USC FEDs):
 ./dumps2root2pdf-HF.py data/239713_*.dat
@@ -25,33 +21,27 @@ export FEDID=999
 cat foo.dat | cpp/badcoffee ${FEDID}
 ./oneRun.py --file1=badcoffee${FEDID}.root --feds1=${FEDID} --progress
 
-
 # compare payloads of different sets of FEDs, within one file
-./look.py 239480 --hf
-./oneRun.py --file1=$LS1/USC_239480.root --feds1=718,719 --feds2=HF \
---dump=0 --output-file=output/239480.root --progress \
- --utca-bcn-delta=-131 --no-warn-quality
-
+./look.py 239480 --feds1=718,719 --feds2=HF --dump=0 --utca-bcn-delta=-131 --no-warn-quality --plugins=histogram,compare
 
 # dump decoded data to stdout
-./oneRun.py --file1=data/B904_Integration_000055.root --feds1=702,931 \
---nevents=1 --dump=4
-
+./look.py 55 --feds1=702,931 --nevents=1 --dump=4
 
 # compare payloads of different sets of FEDs, across two files
 ./oneRun.py --file1=data/B904_Integration_000055.root --feds1=702 \
 --file2=data/mol_run55.root --feds2=931 --dump=0 --any-emap \
 --no-warn-quality --ok-errf=0,1 --utca-bcn-delta=-119
 
-./oneRun.py --file1=$USC/USC_211154.root --feds1=714,722 --nevents=51 --progress \
---file2=$USC/USC_211155.root --feds2=989 --utca-bcn-delta=-119 --any-emap --dump=0
-
+export EOS=root://eoscms.cern.ch//store/group/dpg_hcal/comm_hcal/archival/20160914_USC_Run1_runs133054-220908; \
+./oneRun.py --nevents=51 --progress --utca-bcn-delta=-119 --any-emap --no-warn-quality --dump=0 \
+--file1=${EOS}/USC_211154.root --feds1=714,722 \
+--file2=${EOS}/USC_211155.root --feds2=989
 
 # analyze FE pattern runs
-# (before HO refibering) ./oneRun.py --file1=$LS1/USC_235576.root --feds1=HO  --plugins=patterns | ./diff.py data/ref_2014.txt
-# (before move to uTCA ) ./oneRun.py --file1=$LS1/USC_236631.root --feds1=7xy --plugins=patterns | ./diff.py data/ref_vme_G.txt
-./oneRun.py --file1=$LS1/USC_260773.root --feds1=HBEF --plugins=patterns | ./diff.py data/ref_utca_G.txt
-./oneRun.py --file1=$USC/USC_270688.root --feds1=HBEF --plugins=patterns | ./diff.py data/ref_utca_G.txt
+# (before HO refibering) ./look.py 235576 --feds1=HO  --plugins=patterns | ./diff.py data/ref_2014.txt
+# (before move to uTCA ) ./look.py 236631 --feds1=7xy --plugins=patterns | ./diff.py data/ref_vme_G.txt
+./look.py 260773 --feds1=HBEF --plugins=patterns | ./diff.py data/ref_utca_G.txt
+./look.py 270688 --feds1=HBEF --plugins=patterns | ./diff.py data/ref_utca_G.txt
 ./fiberId.sh 288606
 
 # read about usage
@@ -76,11 +66,11 @@ cat foo.dat | cpp/badcoffee ${FEDID}
 * [ROOT](https://root.cern.ch/) (>=5.32)
 
 
-#### Environment (SLC6/AFS)
+#### Environment
 (use exactly one of these)
-* `env/lxplus6.sh` sets up CMSSW, EOS, and the environment vars LS1,USC
+* `env/cc7-cvmfs.sh` sets up a ROOT 6 environment on cc7
+* `env/lxplus6.sh` sets up CMSSW and EOS
 * `env/slc6-pypy.sh` sets up pypyROOT (outside of CMSSW)
-* `env/slc6-root6.sh` sets up a ROOT 6 environment (outside of CMSSW)
 
 
 #### Files
@@ -90,21 +80,23 @@ cat foo.dat | cpp/badcoffee ${FEDID}
 * `cpp/[mol,deadbeef,badcoffee,rooter].cpp` make .root files from binary event dumps
 * `analyze.py` loops over .root file(s) for one run and produces output/Runxxx.root
 * `autoBook.py` is copied from github.com/elaird/supy/`__autoBook__.py`
-* `configuration/` holds some settings that are used by analyze.py
-* `decode.py` interprets a FED's bytes in an event (called by analyze.unpacked)
+* `configuration/` holds some settings used by `analyze.py`, `plugins/`, etc.
+* `decode.py` interprets a FED's bytes in an event (called by raw.unpacked)
 * `diff.py` compares the decoded output of a FiberID run to data/ref.txt
-* `dumps2root2pdf.py` converts binary event dumps to .root files and analyzes them
+* `dumps2root2pdf-HF.py` converts binary event dumps to .root files and analyzes them
 * `graphs.py` reads in output/Runxxx.root, makes plots, and outputs a .pdf
-* `look.py` will find a file in EOS (or locally) for a given run and loop over it
+* `look.py` will find a files in EOS (or locally) for given runs and loop over them
 * `make_fiberid_references.py` produces FiberID reference files from HCAL logical maps
 * `oneRun.py` is used to analyze one run (see examples above)
-* `options.py` parses command line options for `oneRun.py` or `dumps2root2pdf.py`
-* `printer.py` contains a utility class for printing messages
+* `options.py` parses command line options for `oneRun.py`, `look.py`, or `dumps2root2pdf-HF.py`
+* `printer.py` contains utility functions for printing messages
 * `processUSC.py` loops over available USC local runs and processes them
-* `test_transformation.py` tests `configuration.hw.transformed*`
+* `raw.py` reads and unpacks raw data
+* `test_transformation.py` tests `configuration.hw.transformed*` and `utils.shortList`
 * `utils.py` contains helper functions
 
 #### plugins/
 * `compare.py` compares the payloads within two .root files for a given event
+* `histogram.py` books and fills many per-FED and per-event histograms
 * `patterns.py` interprets the raw data as front-end patterns
 * `printraw.py` dumps to stdout the payload(s) in an event

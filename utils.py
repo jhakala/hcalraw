@@ -1,22 +1,39 @@
 import os
 import subprocess
 import sys
-import printer
-from configuration import hw
 
 
 def cmssw():
     return "CMSSW_VERSION" in os.environ
 
 
-def coords(fedId, evn, orn, bcn):
-    return "FED %4d / EvN 0x%06x (OrN 0x%08x BcN %04d)" % (fedId, evn, orn, bcn)
+def shortList(lst):
+    """ see test_transformation.py"""
 
+    s = ""
+    hyphen = False
 
-def minutes(orn, bcn):
-    orn += float(bcn) / hw.nBx
-    orbPerSec = hw.f_lhc / hw.nBx
-    return orn / orbPerSec / 60.0
+    l = sorted(set(lst))
+    for i, fed in enumerate(l):
+        if not i:
+            s += "%d" % fed
+            continue
+
+        last = i == len(l) - 1
+        prevFed = l[i - 1]
+        if fed == 1 + prevFed:
+            if last:
+                s += "-%d" % fed
+            else:
+                hyphen = True
+            continue
+
+        if hyphen:
+            s += "-%d,%d" % (prevFed, fed)
+        else:
+            s += ",%d" % fed
+        hyphen = False
+    return s
 
 
 def commandOutput(cmd=""):
@@ -60,7 +77,7 @@ def ROOT():
         try:
             exec("import %s as r" % moduleName)
             if moduleName != "ROOT":
-                printer.msg("Using "+moduleName)
+                print "Using " + moduleName
             r.PyConfig.IgnoreCommandLineOptions = True
             return r
         except ImportError:

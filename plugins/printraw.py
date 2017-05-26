@@ -1,10 +1,11 @@
+from configuration import hw
 import printer
-import utils
 
 
 def printraw(raw1={}, raw2={}, **_):
-    if None in raw1 and 1 <= raw1[None]["dump"]:
-        slim1 = (raw1[None]["dump"] == 1) and (len(raw1) == 2) and not raw2
+    dump = raw1.get(None, {}).get("dump", -99)
+    if 1 <= dump:
+        slim1 = (dump in [1, 4]) and (len(raw1) == 2) and (not raw2)
         oneEvent(raw1, slim1=slim1)
         oneEvent(raw2)
 
@@ -16,7 +17,7 @@ def oneEvent(d={}, slim1=False):
     aux = d[None]
 
     if not slim1:
-        printer.purple("-" * 85)
+        printer.purple("-" * 86)
         printer.purple("%4s iEntry 0x%08x (%d)" % (aux["label"], aux["iEntry"], aux["iEntry"]))
 
     printHeaders = not (slim1 and aux["iEntry"])
@@ -35,6 +36,7 @@ def oneEvent(d={}, slim1=False):
                    nonMatchedQie=aux.get("misMatched", []),
                    nonMatchedTp=aux.get("tMisMatched", []),
                    printHeaders=printHeaders,
+                   nTsMax=aux["firstNTs"],
                    )
         printHeaders = True
     if not slim1:
@@ -67,8 +69,8 @@ def htrOverview(d={}):
     printer.cyan(hyphens)
 
 
-def oneHtr(iBlock=None, p={}, printColumnHeaders=None, dump=None, crateslots=[], utca=None,
-           nonMatchedQie=[], nonMatchedTp=[]):
+def oneHtr(iBlock=None, p={}, dump=None, utca=None,
+           nonMatchedQie=[], nonMatchedTp=[], nTsMax=None):
 
     try:
         zs = p.get("ZS")
@@ -87,26 +89,19 @@ def oneHtr(iBlock=None, p={}, printColumnHeaders=None, dump=None, crateslots=[],
         printer.warning("unpacking did not succeed enough to print more about %s" % coords)
         return
 
-    out = []
-    if printColumnHeaders:
-        columns = ["iWord16",
-                   "    EvN",
-                   "  OrN5",
-                   " BcN",
-                   "Cr",
-                   "Sl",
-                   " Fl",
-                   "FrmtV",
-                   "nPre",
-                   #"nWordTP",
-                   col,
-                   "nSamp",
-                   "EvN8",
-                   "  CRC" + ("32" if utca else ""),
-        ]
-        if zs:
-            columns += [" ", "ZSMask:  Thr1, Thr24, ThrTP"]
-        out.append("  ".join(columns))
+    columns = ["iWord16",
+               "    EvN",
+               "  OrN5",
+               " BcN",
+               "Cr",
+               "Sl",
+               " Fl",
+               "FrmtV",
+               "nPre",
+               col,
+              ]
+    if zs:
+        columns += [" ", "ZSMask:  Thr1, Thr24, ThrTP"]
 
     strings = [" %05d" % p["0Word16"],
                " 0x%07x" % p["EvN"],
@@ -117,7 +112,6 @@ def oneHtr(iBlock=None, p={}, printColumnHeaders=None, dump=None, crateslots=[],
                "%2d" % p.get("FWFlavor", -1),  # absent in uHTR
                " 0x%01x" % p["FormatVer"],
                "  %2d" % p["nPreSamples"],
-               #"  %3d  " % p["nWord16Tp"],
                ]
     if utca:
         s = "  %4d/%4d" % (p.get(col, -1), p.get(col+"T", -1))
@@ -125,13 +119,8 @@ def oneHtr(iBlock=None, p={}, printColumnHeaders=None, dump=None, crateslots=[],
     else:
         strings.append("     %3d " % p.get(col, -1))
 
-    strings += ["   %2d" % p.get("nSamples", -1),  # absent in uHTR
-                "  0x%02x" % p["EvN8"],
-                ]
-    if utca:
-        strings.append("0x%08x" % p["CRC"])
-    elif "Qie" in col:
-        strings.append("0x%04x" % p["CRC"])
+    if utca or ("Qie" in col):
+        strings.append("      ")
     else:
         strings.append("  TTP ")
 
@@ -143,63 +132,69 @@ def oneHtr(iBlock=None, p={}, printColumnHeaders=None, dump=None, crateslots=[],
                     "  %3d" % zs["ThresholdTP"],
         ]
 
-    out.append("  ".join(strings))
-    printer.green("\n".join(out))
+    out = []
+    if (not iBlock) or 4 <= dump:
+        out.append("  ".join(columns))
 
-    anyHtrDataPrinted = False
-    if 4 <= dump:
-        kargs = {"skipFibChs": [0, 2, 3, 4, 5, 6, 7] if (4 <= dump <= 6) else [],
-                 "nonMatched": nonMatchedQie,
-                 "latency": p.get("Latency"),
-                 "zs": p.get("ZS"),
-                 "skipErrF": [3],
+    if dump != 4 and dump != 10:
+        out.append("  ".join(strings))
+        printer.green("\n".join(out))
+
+    if dump <= 3:
+        return
+
+    kargs = {"skipFibers": [0, 1] + range(3, 14) + range(15, 24) if (dump == 4) else [],
+             "skipFibChs": [0, 2, 3, 4, 5, 6, 7] if (4 <= dump <= 7) else [],
+             "skipErrF": [],
+             "nonMatched": nonMatchedQie,
+             "latency": p.get("Latency"),
+             "zs": p.get("ZS"),
+             "nTsMax": nTsMax,
+            }
+    if dump in [5, 6, 8]:
+        kargs["skipErrF"] = [3]
+    if dump == 10:
+        kargs["skipErrF"] = [0]
+
+    if p["IsTTP"]:
+        cd = ttpData(p["ttpInput"], p["ttpOutput"], p["ttpAlgoDep"])
+    else:
+        cd = htrChannelData(p["channelData"].values(),
+                            crate=p["Crate"],
+                            slot=p["Slot"],
+                            top=p["Top"],
+                            nPreSamples=p["nPreSamples"],
+                            **kargs)
+
+    if len(cd) >= 2:
+        printer.yellow(cd[0])
+        printer.msg("\n".join(cd[1:]))
+
+    if 6 <= dump:
+        kargs = {"crate": p["Crate"],
+                 "slot": p["Slot"],
+                 "top": p["Top"],
+                 "nonMatched": nonMatchedTp,
+                 "dump": dump,
                  }
-        if dump == 6 or 8 <= dump:
-            kargs["skipErrF"] = []
-        if p["IsTTP"]:
-            cd = ttpData(p["ttpInput"], p["ttpOutput"], p["ttpAlgoDep"])
+        if utca:
+            td = uhtrTriggerData(p["triggerData"], **kargs)
         else:
-            if crateslots and (100*p["Crate"] + p["Slot"]) not in crateslots:
-                return
-            cd = htrChannelData(p["channelData"].values(),
-                                crate=p["Crate"],
-                                slot=p["Slot"],
-                                top=p["Top"],
-                                nPreSamples=p["nPreSamples"],
-                                **kargs)
-        if len(cd) >= 2:
-            printer.yellow(cd[0])
-            printer.msg("\n".join(cd[1:]))
-            anyHtrDataPrinted = True
+            td = htrTriggerData(p["triggerData"], zs=zs, **kargs)
 
-        if 5 <= dump:
-            kargs = {"skipZeroTps": dump <= 7,
-                     "crate": p["Crate"],
-                     "slot": p["Slot"],
-                     "top": p["Top"],
-                     "nonMatched": nonMatchedTp,
-                     }
-            if utca:
-                td = uhtrTriggerData(p["triggerData"], **kargs)
-            else:
-                td = htrTriggerData(p["triggerData"], zs=zs, **kargs)
-
-            if len(td) >= 2:
-                printer.yellow(td[0])
-                printer.msg("\n".join(td[1:]))
-                anyHtrDataPrinted = True
-
-    return anyHtrDataPrinted
+        if len(td) >= 2:
+            printer.yellow(td[0])
+            printer.msg("\n".join(td[1:]))
 
 
-def qieString(qies=[], sois=[], nPreSamples=None, red=False):
+def qieString(qies=[], sois=[], nPreSamples=None, red=False, nMax=10):
     l = []
 
     if nPreSamples and not sois:
         sois = [0] * nPreSamples
         sois.append(1)
 
-    for i in range(10):
+    for i in range(nMax):
         if i < len(qies):
             s = "%2x" % qies[i]
             if i < len(sois) and sois[i] and not red:
@@ -211,10 +206,15 @@ def qieString(qies=[], sois=[], nPreSamples=None, red=False):
     out = " ".join(l)
     if red:
         out = printer.red(out, False)
+
+    if nMax < len(qies):
+        out += printer.red("..", False)
+    else:
+        out += "  "
     return out
 
 
-def htrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonMatched=[], zs={}):
+def htrTriggerData(d={}, dump=None, crate=None, slot=None, top="", nonMatched=[], zs={}):
     columns = ["SLB-ch", "Peak", "SofI", "TP(hex)  0   1   2   3"]
     if zs:
         columns.append("  ZS?")
@@ -224,7 +224,7 @@ def htrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonMa
         z = ""
         soi = ""
         tp = ""
-        if skipZeroTps and not any([dct["TP"]]):
+        if (dump <= 8) and not any([dct["TP"]]):
             continue
 
         for i in range(len(dct["TP"])):
@@ -253,7 +253,7 @@ def htrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonMa
     return out
 
 
-def uhtrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonMatched=[]):
+def uhtrTriggerData(d={}, dump=None, crate=None, slot=None, top="", nonMatched=[]):
     out = []
     out.append("  ".join([" TPid",
                           "Fl",
@@ -264,7 +264,7 @@ def uhtrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonM
                           ])
                )
     for channelId, data in sorted(d.iteritems()):
-        if skipZeroTps and not any(data["TP"]):
+        if (dump <= 8) and not any(data["TP"]):
             continue
         soi = ""
         ok = ""
@@ -278,41 +278,41 @@ def uhtrTriggerData(d={}, skipZeroTps=False, crate=None, slot=None, top="", nonM
             if not data["OK"][j]:
                 tp_s = printer.red(tp_s, False)
             tp += tp_s
-        out.append("   ".join([" 0x%02x" % channelId,
-                               "%1d" % data["Flavor"],
-                               "%5s" % soi,
-                               "%5s" % ok,
-                               " "*2,
-                               tp]))
+
+        if dump != 10 or not all(data["OK"]):
+            out.append("   ".join([" 0x%02x" % channelId,
+                                   "%1d" % data["Flavor"],
+                                   "%5s" % soi,
+                                   "%5s" % ok,
+                                   " "*2,
+                                   tp]))
     return out
 
 
 def htrChannelData(lst=[], crate=0, slot=0, top="", nPreSamples=None,
-                   skipFibChs=[], skipErrF=[],
-                   nonMatched=[], latency={}, zs={},
-                   utcaFiberBlackList=[0,1,10,11,12,13,22,23][:0],
-                   te_tdc=False):
+                   skipFibers=[], skipFibChs=[], skipErrF=[],
+                   nonMatched=[], latency={}, zs={}, te_tdc=False, nTsMax=None):
     out = []
-    columns = ["Crate",
-               "Slot",
+    columns = ["  Cr",
+               "Sl",
                "Fi",
                "Ch",
                "Fl",
-               "ErrF",
-               "Cap0",
-               "NS 0xA0 A1 A2 A3 A4 A5 A6 A7 A8 A9",
-               "0xL0 L1 L2 L3 L4 L5 L6 L7 L8 L9",
+               "Er",
+               "C0",
+               "0xA0 " + " ".join(["A%1d" % i for i in range(1, nTsMax)]),
+               "0xL0 " + " ".join(["L%1d" % i for i in range(1, nTsMax)]),
                ]
     if te_tdc:
-        columns += [" T0 T1 T2 T3 T4 T5 T6 T7 T8 T9"]
+        columns += ["0xT0 " + " ".join(["T%1d" % i for i in range(1, nTsMax)])]
     if latency:
-        columns += [" ", " EF", "Cnt", "IDLE"]
+        columns += [" EF", "Cnt", "IDLE"]
     if zs:
         columns += [" ", "ZS?"]
     out.append(" ".join(columns))
 
     for data in sorted(lst, key=lambda x: (x["Fiber"], x["FibCh"])):
-        if (top not in "tb") and data["Fiber"] in utcaFiberBlackList:
+        if data["Fiber"] in skipFibers:
             continue
         if data["FibCh"] in skipFibChs:
             continue
@@ -320,29 +320,31 @@ def htrChannelData(lst=[], crate=0, slot=0, top="", nPreSamples=None,
             continue
         red = (crate, slot, top, data["Fiber"], data["FibCh"]) in nonMatched
 
-        fields = [" %3d" % crate,
-                  "  %2d%1s" % (slot, top),
-                  "%2d" % data["Fiber"],
+        errf = " %1d" % data["ErrF"]
+        if data["ErrF"]:
+            errf = printer.red(errf, False)
+
+        fields = ["  %2d" % crate,
+                  "%2d%1s%2d" % (slot, top, data["Fiber"]),
                   " %1d" % data["FibCh"],
                   " %1d" % data["Flavor"],
-                  " %2d" % data["ErrF"],
-                  "  %1d" % data["CapId0"],
-                  "  %2d   " % len(data["QIE"]) + qieString(data["QIE"], data.get("SOI", []), nPreSamples, red=red),
-                  "  " + qieString(data.get("TDC", []), data.get("SOI", []))
+                  errf,
+                  " %1d" % data["CapId0"],
+                  "  " + qieString(data["QIE"], data.get("SOI", []), nPreSamples, red=red, nMax=nTsMax),
+                  qieString(data.get("TDC", []), data.get("SOI", []), nMax=nTsMax)
                   ]
         if te_tdc:
-            fields += [qieString(data.get("TDC_TE", []), data.get("SOI", []))]
+            fields += [qieString(data.get("TDC_TE", []), data.get("SOI", []), nMax=nTsMax)]
         out.append(" ".join(fields))
 
         if latency:
             dct = latency.get("Fiber%d" % data["Fiber"])
             if dct and data["FibCh"] == 1:
-                lat = [" "*4,
-                       "%s%s" % (dct["Empty"], dct["Full"]),
-                       "%3d" % dct["Cnt"],
+                lat = ["%s%s" % (dct["Empty"], dct["Full"]),
+                       "%2d " % dct["Cnt"],
                        "%4d" % dct["IdleBCN"],
                 ]
-                out[-1] += "  ".join(lat)
+                out[-1] += " ".join(lat)
         if zs:
             iChannel = 3*(data["Fiber"] - 1) + data["FibCh"]
             marks = zs["DigiMarks"]
@@ -372,7 +374,7 @@ def ttpData(ttpInput=[], ttpOutput=[], ttpAlgoDep=[]):
 
 def oneFedHcal(d={}, dump=None, crateslots=[],
                nonMatchedQie=[], nonMatchedTp=[],
-               printHeaders=None):
+               printHeaders=None, nTsMax=None):
     h = d["header"]
     t = d["trailer"]
     if 1 <= dump:
@@ -381,13 +383,11 @@ def oneFedHcal(d={}, dump=None, crateslots=[],
                   "       OrN",
                   "    BcN",
                   "minutes",
-                  " TTS",
+                  "TTS",
                   "nBytesHW(   SW)",
                   "type",
                   #"CRC16",
                   "nSkip16",
-                  "BcN12",
-                  "EvN8",
                   "Blk8",
                   ]
 
@@ -400,37 +400,34 @@ def oneFedHcal(d={}, dump=None, crateslots=[],
                  "0x%07x" % h["EvN"],
                  "0x%08x" % h["OrN"],
                  "%4d" % h["BcN"],
-                 "%7.3f" % utils.minutes(h["OrN"], h["BcN"]),
-                 ("  %1x" % t["TTS"]) if "TTS" in t else "  - ",
+                 "%7.3f" % hw.minutes(h["OrN"], h["BcN"]),
+                 (" %1x" % t["TTS"]) if "TTS" in t else "  - ",
                  "    %5d(%5d)" % (t["nWord64"]*8 if "nWord64" in t else "  -1", d["nBytesSW"]),
                  "  %1d " % h["Evt_ty"],
                  #(" 0x%04x" % t["CRC16"]) if "CRC16" in t else "   - ",
                  "%7d" % d["nWord16Skipped"],
                  ]
         if h["uFoV"]:
-            sList += [" %4d" % t["BcN12"],
-                      "0x%02x" % t["EvN8"],
-                      "  %2d" % t["Blk_no8"],
-                      ]
+            sList.append("  %2d" % t["Blk_no8"])
 
         printer.blue("  ".join(sList))
-        if 2 <= dump:
+        if 2 <= dump and dump != 4:
             htrOverview(h)
 
     if dump <= 2:
         return
 
-    printColumnHeaders = True
     for iBlock, block in sorted(d["htrBlocks"].iteritems()):
-        printColumnHeaders = oneHtr(iBlock=iBlock,
-                                    p=block,
-                                    printColumnHeaders=printColumnHeaders,
-                                    dump=dump,
-                                    crateslots=crateslots,
-                                    utca=h["utca"],
-                                    nonMatchedQie=nonMatchedQie,
-                                    nonMatchedTp=nonMatchedTp,
-                                   )
+        if crateslots and (100*block["Crate"] + block["Slot"]) not in crateslots:
+            continue
+        oneHtr(iBlock=iBlock,
+               p=block,
+               dump=dump,
+               utca=h["utca"],
+               nonMatchedQie=nonMatchedQie,
+               nonMatchedTp=nonMatchedTp,
+               nTsMax=nTsMax,
+        )
 
 
 def oneFedMol(d):

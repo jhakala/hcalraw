@@ -1,93 +1,22 @@
 #!/usr/bin/env python
 
-import analyze
-import printer
-import graphs
-import sys
-from configuration import sw, matching
-from options import opts
-
-
-def subset(options, l, process=False, invert=False):
-    assert not (process and invert)
-
-    out = {}
-    for item in l:
-        value = getattr(options, item)
-        if process:
-            out[item] = sw.fedList(value)
-        elif invert:
-            # "noFoo": True --> "foo": False
-            out[item[2].lower() + item[3:]] = not value
-        else:
-            out[item] = value
-    return out
-
-
-def check_and_adjust(options):
-    if not all([options.file1, options.feds1]):
-        sys.exit("--file1 and --feds1 are required (see './oneRun.py --help').")
-    if not options.outputFile.endswith(".root"):
-        sys.exit("--output-file must end with .root (%s)" % options.outputFile)
-    if 0 <= options.sparseLoop:
-        if options.file2:
-            sys.exit("--sparse-loop does not work with --file2")
-        if options.nEventsSkip:
-            sys.exit("--sparse-loop does not work with --nevents-skip")
-    if options.feds2 and (not options.file2) and (not options.noLoop):
-        # print "INFO: using --file1 also for --file2; also using identity map"
-        options.file2 = options.file1
-        options.identityMap = True
-
-    options.plugins = options.plugins.split(",")
-    if "patterns" in options.plugins:
-        printer.info("setting nEvents=1 ('patterns' was in list of plugins)")
-        options.nEvents = 1
-
-    if 1 <= options.dump and "printraw" not in options.plugins:
-        # printer.info("adding printraw to list of plugins ('--dump' was at least 1)")
-        options.plugins.append("printraw")
-
-
-def go(options):
-    kargs = subset(options, ["feds1", "feds2"], process=True)
-    kargs.update(subset(options, ["nEvents", "nEventsSkip", "outputFile", "noUnpack", "sparseLoop", "plugins"]))
-    kargs["compareOptions"] = subset(options, ["anyEmap", "printEmap", "printMismatches", "fewerHistos"])
-    kargs["mapOptions"] = subset(options, ["printEventMap", "identityMap"])
-    kargs["printOptions"] = subset(options, ["dump", "progress"])
-    kargs["printOptions"].update(subset(options, ["noWarnUnpack", "noWarnQuality"], invert=True))
-    kargs["printOptions"]["crateslots"] = sw.fedList(options.crateslots)
-
-    for iFile in [1, 2]:
-        value = getattr(options, "file%d" % iFile)
-        if value:
-            kargs["files%d" % iFile] = value.split(",")
-
-    return analyze.oneRun(**kargs)
+import cProfile
+import analyze, graphs
+from configuration.sw import fedList
+from options import oparser
 
 
 def main(options):
-    check_and_adjust(options)
-
-    matching.__okErrF = sw.fedList(options.okErrF)
-    matching.__utcaBcnDelta = options.utcaBcnDelta
-    matching.__utcaPipelineDelta = options.utcaPipelineDelta
-    if options.noColor:
-        printer.__color = False
-
     if options.noLoop:
-        goCode = 0
+        retCode = 0
+        feds1 = fedList(options.feds1)
+        feds2 = fedList(options.feds2)
+    elif options.profile:
+        pr = cProfile.Profile()
+        retCode, feds1, feds2 = pr.runcall(analyze.main, options)
+        pr.print_stats("time")
     else:
-        analyze.setup(options.plugins)
-        if options.profile:
-            import cProfile
-            cProfile.runctx("go(options)", globals(), locals(), sort="time")
-            # FIXME
-            goCode = 0
-            feds1 = []
-            feds2 = []
-        else:
-            goCode, feds1, feds2 = go(options)
+        retCode, feds1, feds2 = analyze.main(options)
 
     if feds2 and 0 <= options.dump:
         analyze.printChannelSummary(options.outputFile)
@@ -95,8 +24,8 @@ def main(options):
     if not options.noPlot:
         graphs.main(options.outputFile, feds1, feds2)
 
-    return goCode
+    return retCode, feds1, feds2
 
 
 if __name__ == "__main__":
-    main(opts()[0])
+    main(oparser().parse_args()[0])
